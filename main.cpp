@@ -26,23 +26,24 @@ double randomDouble() {
 
 int nplanets;
 int timesteps;
-double dt;
-double G;
+const double dt = 0.001;
+const double G = 6.6743;
 
-struct Vec2 {
+struct alignas(32) Vec2 {
   double x, y;
 };
 
 void simulate(const double* __restrict__ mass, Vec2* __restrict__ pos,
               Vec2* __restrict__ vel) {
   for (int t = 0; t < timesteps; t++) {
+#pragma omp parallel for schedule(static)
     for (int i = 0; i < nplanets; i++) {
       for (int j = 0; j < nplanets; j++) {
-        double dx = pos[j].x - pos[i].x;
-        double dy = pos[j].y - pos[i].y;
-        double distSqr = dx * dx + dy * dy + 0.0001;
-        double invDist = mass[i] * mass[j] / sqrt(distSqr);
-        double invDist3 = invDist * invDist * invDist;
+        const double dx = pos[j].x - pos[i].x;
+        const double dy = pos[j].y - pos[i].y;
+        const double distSqr = dx * dx + dy * dy + 0.0001;
+        const double invDist = mass[i] * mass[j] / sqrt(distSqr);
+        const double invDist3 = invDist * invDist * invDist;
         vel[i].x += dt * dx * invDist3;
         vel[i].y += dt * dy * invDist3;
       }
@@ -63,8 +64,6 @@ int main(int argc, const char** argv) {
   }
   nplanets = atoi(argv[1]);
   timesteps = atoi(argv[2]);
-  dt = 0.001;
-  G = 6.6743;
 
   double* mass = (double*)malloc(sizeof(double) * nplanets);
   Vec2* pos = (Vec2*)malloc(sizeof(Vec2) * nplanets);
