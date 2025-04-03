@@ -7,14 +7,6 @@ float tdiff(struct timeval* start, struct timeval* end) {
   return (end->tv_sec - start->tv_sec) + 1e-6 * (end->tv_usec - start->tv_usec);
 }
 
-struct Planet {
-  double mass;
-  double x;
-  double y;
-  double vx;
-  double vy;
-};
-
 unsigned long long seed = 100;
 
 unsigned long long randomU64() {
@@ -37,31 +29,30 @@ int timesteps;
 double dt;
 double G;
 
-Planet* next(Planet* planets) {
-  Planet* nextplanets = (Planet*)malloc(sizeof(Planet) * nplanets);
-  for (int i = 0; i < nplanets; i++) {
-    nextplanets[i].vx = planets[i].vx;
-    nextplanets[i].vy = planets[i].vy;
-    nextplanets[i].mass = planets[i].mass;
-    nextplanets[i].x = planets[i].x;
-    nextplanets[i].y = planets[i].y;
-  }
+struct Vec2 {
+  double x, y;
+};
 
-  for (int i = 0; i < nplanets; i++) {
-    for (int j = 0; j < nplanets; j++) {
-      double dx = planets[j].x - planets[i].x;
-      double dy = planets[j].y - planets[i].y;
-      double distSqr = dx * dx + dy * dy + 0.0001;
-      double invDist = planets[i].mass * planets[j].mass / sqrt(distSqr);
-      double invDist3 = invDist * invDist * invDist;
-      nextplanets[i].vx += dt * dx * invDist3;
-      nextplanets[i].vy += dt * dy * invDist3;
+void simulate(double* mass, Vec2* pos, Vec2* vel) {
+  for (int t = 0; t < timesteps; t++) {
+    for (int i = 0; i < nplanets; i++) {
+      for (int j = 0; j < nplanets; j++) {
+        double dx = pos[j].x - pos[i].x;
+        double dy = pos[j].y - pos[i].y;
+        double distSqr = dx * dx + dy * dy + 0.0001;
+        double invDist = mass[i] * mass[j] / sqrt(distSqr);
+        double invDist3 = invDist * invDist * invDist;
+        vel[i].x += dt * dx * invDist3;
+        vel[i].y += dt * dy * invDist3;
+      }
     }
-    nextplanets[i].x += dt * nextplanets[i].vx;
-    nextplanets[i].y += dt * nextplanets[i].vy;
+
+    // Update positions
+    for (int i = 0; i < nplanets; i++) {
+      pos[i].x += dt * vel[i].x;
+      pos[i].y += dt * vel[i].y;
+    }
   }
-  free(planets);
-  return nextplanets;
 }
 
 int main(int argc, const char** argv) {
@@ -74,25 +65,23 @@ int main(int argc, const char** argv) {
   dt = 0.001;
   G = 6.6743;
 
-  Planet* planets = (Planet*)malloc(sizeof(Planet) * nplanets);
+  double* mass = (double*)malloc(sizeof(double) * nplanets);
+  Vec2* pos = (Vec2*)malloc(sizeof(Vec2) * nplanets);
+  Vec2* vel = (Vec2*)malloc(sizeof(Vec2) * nplanets);
   for (int i = 0; i < nplanets; i++) {
-    planets[i].mass = randomDouble() * 10 + 0.2;
-    planets[i].x = (randomDouble() - 0.5) * 100 * pow(1 + nplanets, 0.4);
-    planets[i].y = (randomDouble() - 0.5) * 100 * pow(1 + nplanets, 0.4);
-    planets[i].vx = randomDouble() * 5 - 2.5;
-    planets[i].vy = randomDouble() * 5 - 2.5;
+    mass[i] = randomDouble() * 10 + 0.2;
+    pos[i].x = (randomDouble() - 0.5) * 100 * pow(1 + nplanets, 0.4);
+    pos[i].y = (randomDouble() - 0.5) * 100 * pow(1 + nplanets, 0.4);
+    vel[i].x = randomDouble() * 5 - 2.5;
+    vel[i].y = randomDouble() * 5 - 2.5;
   }
 
   struct timeval start, end;
   gettimeofday(&start, NULL);
-  for (int i = 0; i < timesteps; i++) {
-    planets = next(planets);
-    // printf("x=%f y=%f vx=%f vy=%f\n", planets[nplanets-1].x,
-    // planets[nplanets-1].y, planets[nplanets-1].vx, planets[nplanets-1].vy);
-  }
+  simulate(mass, pos, vel);
   gettimeofday(&end, NULL);
   printf("Total time to run simulation %0.6f seconds, final location %f %f\n",
-         tdiff(&start, &end), planets[nplanets - 1].x, planets[nplanets - 1].y);
+         tdiff(&start, &end), pos[nplanets - 1].x, pos[nplanets - 1].y);
 
   return 0;
 }
