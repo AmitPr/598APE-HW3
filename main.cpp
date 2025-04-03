@@ -33,7 +33,8 @@ struct Vec2 {
   double x, y;
 };
 
-void simulate(double* mass, Vec2* pos, Vec2* vel) {
+void simulate(const double* __restrict__ mass, Vec2* __restrict__ pos,
+              Vec2* __restrict__ vel) {
   for (int t = 0; t < timesteps; t++) {
     for (int i = 0; i < nplanets; i++) {
       for (int j = 0; j < nplanets; j++) {
