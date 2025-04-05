@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
+#include "vec.h"
+
 float tdiff(struct timeval* start, struct timeval* end) {
   return (end->tv_sec - start->tv_sec) + 1e-6 * (end->tv_usec - start->tv_usec);
 }
@@ -29,24 +31,33 @@ int timesteps;
 const double dt = 0.001;
 const double G = 6.6743;
 
-struct alignas(32) Vec2 {
-  double x, y;
-};
 
 void simulate(const double* __restrict__ mass, Vec2* __restrict__ pos,
               Vec2* __restrict__ vel) {
   for (int t = 0; t < timesteps; t++) {
 #pragma omp parallel for schedule(static)
     for (int i = 0; i < nplanets; i++) {
+      Vec2 acc = vel[i];
       for (int j = 0; j < nplanets; j++) {
-        const double dx = pos[j].x - pos[i].x;
-        const double dy = pos[j].y - pos[i].y;
-        const double distSqr = dx * dx + dy * dy + 0.0001;
+        const Vec2 dist = pos[j] - pos[i];
+        const double distSqr = dist.mag2() + 0.0001;
         const double invDist = mass[i] * mass[j] / sqrt(distSqr);
         const double invDist3 = invDist * invDist * invDist;
-        vel[i].x += dt * dx * invDist3;
-        vel[i].y += dt * dy * invDist3;
+        acc += (dist * dt) * invDist3;
+
+        // const double dx = pos[j].x - pos[i].x;
+        // const double dy = pos[j].y - pos[i].y;
+        // const double distSqr = dx * dx + dy * dy + 0.0001;
+        // const double invDist = mass[i] * mass[j] / sqrt(distSqr);
+        // const double invDist3 = invDist * invDist * invDist;
+        // vel[i].x += dt * dx * invDist3;
+        // vel[i].y += dt * dy * invDist3;
+        // acc.x += dt * dx * invDist3;
+        // acc.y += dt * dy * invDist3;
+        // vel[j].x -= dt * dx * invDist3;
+        // vel[j].y -= dt * dy * invDist3;
       }
+      vel[i] = acc;
     }
 
     // Update positions
