@@ -1,2 +1,4 @@
 main.exe*
 perf.data*
+profile.json.gz
+cachegrind.out*

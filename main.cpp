@@ -31,7 +31,6 @@ int timesteps;
 const double dt = 0.001;
 const double G = 6.6743;
 
-
 void simulate(const double* __restrict__ mass, Vec2* __restrict__ pos,
               Vec2* __restrict__ vel) {
   for (int t = 0; t < timesteps; t++) {
@@ -44,26 +43,13 @@ void simulate(const double* __restrict__ mass, Vec2* __restrict__ pos,
         const double invDist = mass[i] * mass[j] / sqrt(distSqr);
         const double invDist3 = invDist * invDist * invDist;
         acc += (dist * dt) * invDist3;
-
-        // const double dx = pos[j].x - pos[i].x;
-        // const double dy = pos[j].y - pos[i].y;
-        // const double distSqr = dx * dx + dy * dy + 0.0001;
-        // const double invDist = mass[i] * mass[j] / sqrt(distSqr);
-        // const double invDist3 = invDist * invDist * invDist;
-        // vel[i].x += dt * dx * invDist3;
-        // vel[i].y += dt * dy * invDist3;
-        // acc.x += dt * dx * invDist3;
-        // acc.y += dt * dy * invDist3;
-        // vel[j].x -= dt * dx * invDist3;
-        // vel[j].y -= dt * dy * invDist3;
       }
       vel[i] = acc;
     }
 
     // Update positions
     for (int i = 0; i < nplanets; i++) {
-      pos[i].x += dt * vel[i].x;
-      pos[i].y += dt * vel[i].y;
+      pos[i] += vel[i] * dt;
     }
   }
 }
@@ -93,6 +79,10 @@ int main(int argc, const char** argv) {
   gettimeofday(&end, NULL);
   printf("Total time to run simulation %0.6f seconds, final location %f %f\n",
          tdiff(&start, &end), pos[nplanets - 1].x, pos[nplanets - 1].y);
+
+  free(mass);
+  free(pos);
+  free(vel);
 
   return 0;
 }
