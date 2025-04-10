@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
+#include "quadtree.h"
 #include "vec.h"
 
 float tdiff(struct timeval* start, struct timeval* end) {
@@ -34,16 +35,29 @@ const double G = 6.6743;
 void simulate(const double* __restrict__ mass, Vec2* __restrict__ pos,
               Vec2* __restrict__ vel) {
   for (int t = 0; t < timesteps; t++) {
+    Vec2 min = pos[0], max = pos[0];
+    for (int i = 0; i < nplanets; i++) {
+      min = min.elementwiseMin(pos[i]);
+      max = max.elementwiseMax(pos[i]);
+    }
+    Vec2 center = (min + max) * 0.5;
+    Vec2 size = max - min;
+    Node* root = new Node(center, sqrt(size.mag2()));
+    for (int i = 0; i < nplanets; i++) {
+      root->insert(i, pos[i], mass[i]);
+    }
 #pragma omp parallel for schedule(static)
     for (int i = 0; i < nplanets; i++) {
       Vec2 acc = vel[i];
-      for (int j = 0; j < nplanets; j++) {
-        const Vec2 dist = pos[j] - pos[i];
-        const double distSqr = dist.mag2() + 0.0001;
-        const double invDist = mass[i] * mass[j] / sqrt(distSqr);
-        const double invDist3 = invDist * invDist * invDist;
-        acc += (dist * dt) * invDist3;
-      }
+      Vec2 force = root->calculateForce(pos[i], mass[i], 0.25);
+      acc += force;
+      // for (int j = 0; j < nplanets; j++) {
+      //   const Vec2 dist = pos[j] - pos[i];
+      //   const double distSqr = dist.mag2() + 0.0001;
+      //   const double invDist = mass[i] * mass[j] / sqrt(distSqr);
+      //   const double invDist3 = invDist * invDist * invDist;
+      //   acc += (dist * dt) * invDist3;
+      // }
       vel[i] = acc;
     }
 

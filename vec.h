@@ -39,13 +39,21 @@ struct alignas(16) Vec2 {
     __m128d shuf = _mm_castps_pd(shuftmp);
     return _mm_cvtsd_f64(_mm_add_sd(sq, shuf));
   }
+
+  bool operator==(const Vec2& other) const {
+    return _mm_movemask_pd(_mm_cmpeq_pd(vec, other.vec)) == 0x3;
+  }
+
+  Vec2 elementwiseMin(const Vec2& other) const {
+    return Vec2{_mm_min_pd(vec, other.vec)};
+  }
+  Vec2 elementwiseMax(const Vec2& other) const {
+    return Vec2{_mm_max_pd(vec, other.vec)};
+  }
 };
 
 inline Vec2 operator*(double scalar, const Vec2& v) {
   return Vec2{_mm_mul_pd(v.vec, _mm_set1_pd(scalar))};
-}
-inline Vec2 operator/(const Vec2& v, double scalar) {
-  return Vec2{_mm_div_pd(v.vec, _mm_set1_pd(scalar))};
 }
 inline Vec2 operator-(const Vec2& v) {
   return Vec2{_mm_sub_pd(_mm_setzero_pd(), v.vec)};
