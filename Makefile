@@ -9,5 +9,8 @@ OBJ_FILES := $(addprefix $(OBJ_DIR),$(notdir $(CPP_FILES:.cpp=.obj)))
 all:
 	$(FUNC) ./main.cpp -o ./main.exe $(FLAGS)
 
+exact:
+	$(FUNC) ./main.cpp -o ./main.exe $(FLAGS) -DEXACT
+
 clean:
 	rm -f ./*.exe

@@ -1,10 +1,9 @@
+#include <immintrin.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
-
-#include "immintrin.h"
 
 float tdiff(struct timeval* start, struct timeval* end) {
   return (end->tv_sec - start->tv_sec) + 1e-6 * (end->tv_usec - start->tv_usec);
@@ -21,27 +20,12 @@ struct World {
     // round n up to the next multiple of 8, for AVX alignment
     n = (n + 7) & ~7;
     int size = sizeof(double) * n;
-    if (posix_memalign((void**)&mass, 64, size)) {
-      fprintf(stderr, "Aligned allocation failed\n");
-      exit(1);
-    }
-
-    if (posix_memalign((void**)&x, 64, size)) {
-      fprintf(stderr, "Aligned allocation failed\n");
-      exit(1);
-    }
-
-    if (posix_memalign((void**)&y, 64, size)) {
-      fprintf(stderr, "Aligned allocation failed\n");
-      exit(1);
-    }
-
-    if (posix_memalign((void**)&vx, 64, size)) {
-      fprintf(stderr, "Aligned allocation failed\n");
-      exit(1);
-    }
-
-    if (posix_memalign((void**)&vy, 64, size)) {
+    int ret = posix_memalign((void**)&mass, 64, size);
+    ret |= posix_memalign((void**)&x, 64, size);
+    ret |= posix_memalign((void**)&y, 64, size);
+    ret |= posix_memalign((void**)&vx, 64, size);
+    ret |= posix_memalign((void**)&vy, 64, size);
+    if (ret) {
       fprintf(stderr, "Aligned allocation failed\n");
       exit(1);
     }
@@ -69,44 +53,58 @@ double randomDouble() {
 
 int nplanets;
 int timesteps;
-double dt;
-double G;
+const double dt = 0.001;
+const double G = 6.6743;
+
+#define mul(a, b) _mm512_mul_pd(a, b)
+#define add(a, b) _mm512_add_pd(a, b)
+#define sub(a, b) _mm512_sub_pd(a, b)
+#define sqrt(a) _mm512_sqrt_pd(a)
+#define rsqrt(a) _mm512_rsqrt14_pd(a)
+#define div(a, b) _mm512_div_pd(a, b)
+#define load(a) _mm512_load_pd(a)
+#define store(a, b) _mm512_store_pd(a, b)
+#define set1(a) _mm512_set1_pd(a)
+#define fmadd(a, b, c) _mm512_fmadd_pd(a, b, c)
+
+#define CACHE_LOOKAHEAD 64
 
 void simulate(World& world) {
-  __m512d dt_vec = _mm512_set1_pd(dt);
-  __m512d epsilon = _mm512_set1_pd(0.0001);
+  __m512d dt_vec = set1(dt);
+  __m512d epsilon = set1(0.0001);
 #pragma omp parallel for schedule(static)
   for (int i = 0; i < nplanets; i++) {
-    __m512d x_i = _mm512_set1_pd(world.x[i]);
-    __m512d y_i = _mm512_set1_pd(world.y[i]);
-    __m512d mass_i = _mm512_set1_pd(world.mass[i]);
+    const __m512d x_i = set1(world.x[i]);
+    const __m512d y_i = set1(world.y[i]);
+    const __m512d mass_i = set1(world.mass[i]);
     __m512d acc_x = _mm512_setzero_pd();
     __m512d acc_y = _mm512_setzero_pd();
     for (int j = 0; j < nplanets; j += 8) {
-      __m512d dx = _mm512_sub_pd(_mm512_load_pd(world.x + j), x_i);
-      __m512d dy = _mm512_sub_pd(_mm512_load_pd(world.y + j), y_i);
-      __m512d distSqr =
-          _mm512_fmadd_pd(dx, dx, _mm512_fmadd_pd(dy, dy, epsilon));
-      __m512d invDist =
-          _mm512_div_pd(_mm512_mul_pd(mass_i, _mm512_load_pd(world.mass + j)),
-                        _mm512_sqrt_pd(distSqr));
-      __m512d invDist3 =
-          _mm512_mul_pd(_mm512_mul_pd(invDist, invDist), invDist);
+      const __m512d dx = sub(load(world.x + j), x_i);
+      const __m512d dy = sub(load(world.y + j), y_i);
+      const __m512d distSqr = fmadd(dx, dx, fmadd(dy, dy, epsilon));
+#ifdef EXACT
+      const __m512d invDist =
+          div(mul(mass_i, load(world.mass + j)), sqrt(distSqr));
+#else
+      const __m512d invDist =
+          mul(mul(mass_i, load(world.mass + j)), rsqrt(distSqr));
+#endif
+      const __m512d invDist3 = mul(mul(invDist, invDist), invDist);
       // acc = acc + dx*invDist3
-      acc_x = _mm512_fmadd_pd(dx, invDist3, acc_x);
-      acc_y = _mm512_fmadd_pd(dy, invDist3, acc_y);
+      acc_x = fmadd(dx, invDist3, acc_x);
+      acc_y = fmadd(dy, invDist3, acc_y);
     }
     world.vx[i] += dt * _mm512_reduce_add_pd(acc_x);
     world.vy[i] += dt * _mm512_reduce_add_pd(acc_y);
   }
+
   for (int i = 0; i < nplanets; i += 8) {
     // p = p + v*dt
-    __m512d x = _mm512_fmadd_pd(dt_vec, _mm512_load_pd(world.vx + i),
-                                _mm512_load_pd(world.x + i));
-    __m512d y = _mm512_fmadd_pd(dt_vec, _mm512_load_pd(world.vy + i),
-                                _mm512_load_pd(world.y + i));
-    _mm512_store_pd(world.x + i, x);
-    _mm512_store_pd(world.y + i, y);
+    const __m512d x = fmadd(dt_vec, load(world.vx + i), load(world.x + i));
+    const __m512d y = fmadd(dt_vec, load(world.vy + i), load(world.y + i));
+    store(world.x + i, x);
+    store(world.y + i, y);
 
     // printf("%0.16f %0.16f ", world.x[i], world.y[i]);
   }
@@ -120,8 +118,6 @@ int main(int argc, const char** argv) {
   }
   nplanets = atoi(argv[1]);
   timesteps = atoi(argv[2]);
-  dt = 0.001;
-  G = 6.6743;
 
   World world(nplanets);
   for (int i = 0; i < nplanets; i++) {
