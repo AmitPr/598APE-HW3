@@ -5,8 +5,10 @@
 #include <string.h>
 #include <sys/time.h>
 
-#define CACHE_LOOKAHEAD 64
+// Use AVX512 instead of AVX2:
 // #define AVX512
+#define CACHE_LOOKAHEAD 64
+#define VECTOR_THRESHOLD 32
 
 #include "vec.h"
 
@@ -94,7 +96,7 @@ void simulate(World& world) {
       const vec dy = sub(load(world.y + j), y_i);
       const vec distSqr = fmadd(dx, dx, fmadd(dy, dy, epsilon));
 #ifdef EXACT
-      const vec inv = div(mul(mass_i, load(world.mass + j)), sqrt(distSqr));
+      const vec inv = div(mul(mass_i, load(world.mass + j)), vsqrt(distSqr));
 #else
       const vec inv = mul(mul(mass_i, load(world.mass + j)), rsqrt(distSqr));
 #endif
@@ -103,7 +105,7 @@ void simulate(World& world) {
       const vec dy2 = sub(load(world.y + j), y_i2);
       const vec distSqr2 = fmadd(dx2, dx2, fmadd(dy2, dy2, epsilon));
 #ifdef EXACT
-      const vec inv2 = div(mul(mass_i2, load(world.mass + j)), sqrt(distSqr2));
+      const vec inv2 = div(mul(mass_i2, load(world.mass + j)), vsqrt(distSqr2));
 #else
       const vec inv2 = mul(mul(mass_i2, load(world.mass + j)), rsqrt(distSqr2));
 #endif
@@ -134,6 +136,46 @@ void simulate(World& world) {
   // printf("\n");
 }
 
+void simulate_unvectorized(World& world) {
+  for (int i = 0; i < nplanets; i += 2) {
+    double p_x_i = world.x[i];
+    double p_y_i = world.y[i];
+    double p_mass_i = world.mass[i];
+
+    double p_x_i2 = world.x[i + 1];
+    double p_y_i2 = world.y[i + 1];
+    double p_mass_i2 = world.mass[i + 1];
+    for (int j = i + 1; j < nplanets; j++) {
+      double dx = world.x[j] - p_x_i;
+      double dy = world.y[j] - p_y_i;
+      double distSqr = dx * dx + dy * dy + 0.0001;
+      double invDist = p_mass_i * world.mass[j] / sqrt(distSqr);
+      double invDist3 = invDist * invDist * invDist;
+
+      double dx2 = world.x[j] - p_x_i2;
+      double dy2 = world.y[j] - p_y_i2;
+      double distSqr2 = dx2 * dx2 + dy2 * dy2 + 0.0001;
+      double invDist2 = p_mass_i2 * world.mass[j] / sqrt(distSqr2);
+      double invDist32 = invDist2 * invDist2 * invDist2;
+
+      world.vx[i] += dt * dx * invDist3;
+      world.vy[i] += dt * dy * invDist3;
+      world.vx[j] -= dt * dx * invDist3;
+      world.vy[j] -= dt * dy * invDist3;
+
+      world.vx[i + 1] += dt * dx2 * invDist32;
+      world.vy[i + 1] += dt * dy2 * invDist32;
+      world.vx[j] -= dt * dx2 * invDist32;
+      world.vy[j] -= dt * dy2 * invDist32;
+    }
+  }
+
+  for (int i = 0; i < nplanets; i++) {
+    world.x[i] += dt * world.vx[i];
+    world.y[i] += dt * world.vy[i];
+  }
+}
+
 int main(int argc, const char** argv) {
   if (argc < 2) {
     printf("Usage: %s <nplanets> <timesteps>\n", argv[0]);
@@ -155,10 +197,16 @@ int main(int argc, const char** argv) {
 
   struct timeval start, end;
   gettimeofday(&start, NULL);
-  for (int i = 0; i < timesteps; i++) simulate(world);
+  if (nplanets <= VECTOR_THRESHOLD) {
+    for (int i = 0; i < timesteps; i++) simulate_unvectorized(world);
+  } else {
+    for (int i = 0; i < timesteps; i++) simulate(world);
+  }
   gettimeofday(&end, NULL);
-  printf("Total time to run simulation %0.6f seconds, final location %f %f\n",
-         tdiff(&start, &end), world.x[nplanets - 1], world.y[nplanets - 1]);
+  printf(
+      "Total time to run simulation %0.6f seconds, final location %f "
+      "%f\n",
+      tdiff(&start, &end), world.x[nplanets - 1], world.y[nplanets - 1]);
 
   return 0;
 }
