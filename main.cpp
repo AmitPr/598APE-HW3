@@ -36,7 +36,7 @@ void simulate(const double* __restrict__ mass, Vec2* __restrict__ pos,
               Vec2* __restrict__ vel) {
   for (int t = 0; t < timesteps; t++) {
     Vec2 min = pos[0], max = pos[0];
-    for (int i = 0; i < nplanets; i++) {
+    for (int i = 1; i < nplanets; i++) {
       min = min.elementwiseMin(pos[i]);
       max = max.elementwiseMax(pos[i]);
     }
@@ -48,17 +48,8 @@ void simulate(const double* __restrict__ mass, Vec2* __restrict__ pos,
     }
 #pragma omp parallel for schedule(static)
     for (int i = 0; i < nplanets; i++) {
-      Vec2 acc = vel[i];
-      Vec2 force = root->calculateForce(pos[i], mass[i], 0.25);
-      acc += force;
-      // for (int j = 0; j < nplanets; j++) {
-      //   const Vec2 dist = pos[j] - pos[i];
-      //   const double distSqr = dist.mag2() + 0.0001;
-      //   const double invDist = mass[i] * mass[j] / sqrt(distSqr);
-      //   const double invDist3 = invDist * invDist * invDist;
-      //   acc += (dist * dt) * invDist3;
-      // }
-      vel[i] = acc;
+      Vec2 force = root->calculateForce(pos[i], mass[i], 0);
+      vel[i] += force;
     }
 
     // Update positions
