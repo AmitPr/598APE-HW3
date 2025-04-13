@@ -76,12 +76,19 @@ void simulate(World& world) {
   vec dt_vec = set1(dt);
   vec epsilon = set1(0.0001);
 #pragma omp parallel for schedule(static)
-  for (int i = 0; i < nplanets; i++) {
+  for (int i = 0; i < nplanets; i += 2) {
     const vec x_i = set1(world.x[i]);
     const vec y_i = set1(world.y[i]);
     const vec mass_i = set1(world.mass[i]);
     vec acc_x = zero();
     vec acc_y = zero();
+
+    const vec x_i2 = set1(world.x[i + 1]);
+    const vec y_i2 = set1(world.y[i + 1]);
+    const vec mass_i2 = set1(world.mass[i + 1]);
+    vec acc_x2 = zero();
+    vec acc_y2 = zero();
+
     for (int j = 0; j < nplanets; j += WIDTH) {
       const vec dx = sub(load(world.x + j), x_i);
       const vec dy = sub(load(world.y + j), y_i);
@@ -91,13 +98,28 @@ void simulate(World& world) {
 #else
       const vec inv = mul(mul(mass_i, load(world.mass + j)), rsqrt(distSqr));
 #endif
+
+      const vec dx2 = sub(load(world.x + j), x_i2);
+      const vec dy2 = sub(load(world.y + j), y_i2);
+      const vec distSqr2 = fmadd(dx2, dx2, fmadd(dy2, dy2, epsilon));
+#ifdef EXACT
+      const vec inv2 = div(mul(mass_i2, load(world.mass + j)), sqrt(distSqr2));
+#else
+      const vec inv2 = mul(mul(mass_i2, load(world.mass + j)), rsqrt(distSqr2));
+#endif
       const vec invDist3 = mul(mul(inv, inv), inv);
       // acc = acc + dx*invDist3
       acc_x = fmadd(dx, invDist3, acc_x);
       acc_y = fmadd(dy, invDist3, acc_y);
+
+      const vec invDist32 = mul(mul(inv2, inv2), inv2);
+      acc_x2 = fmadd(dx2, invDist32, acc_x2);
+      acc_y2 = fmadd(dy2, invDist32, acc_y2);
     }
     world.vx[i] += dt * reduce_add(acc_x);
     world.vy[i] += dt * reduce_add(acc_y);
+    world.vx[i + 1] += dt * reduce_add(acc_x2);
+    world.vy[i + 1] += dt * reduce_add(acc_y2);
   }
 
   for (int i = 0; i < nplanets; i += WIDTH) {
