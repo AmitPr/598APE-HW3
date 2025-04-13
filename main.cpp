@@ -29,9 +29,21 @@ struct World {
       fprintf(stderr, "Aligned allocation failed\n");
       exit(1);
     }
+
+    memset(mass, 0, sizeof(double) * nplanets);
+    memset(x, 0, sizeof(double) * nplanets);
+    memset(y, 0, sizeof(double) * nplanets);
+    memset(vx, 0, sizeof(double) * nplanets);
+    memset(vy, 0, sizeof(double) * nplanets);
   }
 
-  ~World() { free(mass); }
+  ~World() {
+    free(mass);
+    free(x);
+    free(y);
+    free(vx);
+    free(vy);
+  }
 };
 
 unsigned long long seed = 100;
