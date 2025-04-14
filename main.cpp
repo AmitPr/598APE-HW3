@@ -7,8 +7,7 @@
 
 // Use AVX512 instead of AVX2:
 // #define AVX512
-#define CACHE_LOOKAHEAD 64
-#define VECTOR_THRESHOLD 32
+#define VECTOR_THRESHOLD 152
 
 #include "vec.h"
 
@@ -77,7 +76,7 @@ double randomDouble() {
 void simulate(World& world) {
   vec dt_vec = set1(dt);
   vec epsilon = set1(0.0001);
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for schedule(static) if (nplanets > 32)
   for (int i = 0; i < nplanets; i += 2) {
     const vec x_i = set1(world.x[i]);
     const vec y_i = set1(world.y[i]);
@@ -131,48 +130,63 @@ void simulate(World& world) {
     store(world.x + i, x);
     store(world.y + i, y);
   }
-  // for (int i = 0; i < nplanets; i+=16)
-  //   printf("%0.16f %0.16f ", world.x[i], world.y[i]);
-  // printf("\n");
 }
 
-void simulate_unvectorized(World& world) {
+void simulate_sequential(World& world) {
+  vec dt_vec = set1(dt);
+  vec epsilon = set1(0.0001);
   for (int i = 0; i < nplanets; i += 2) {
-    double p_x_i = world.x[i];
-    double p_y_i = world.y[i];
-    double p_mass_i = world.mass[i];
+    const vec x_i = set1(world.x[i]);
+    const vec y_i = set1(world.y[i]);
+    const vec mass_i = set1(world.mass[i]);
+    vec acc_x = zero();
+    vec acc_y = zero();
 
-    double p_x_i2 = world.x[i + 1];
-    double p_y_i2 = world.y[i + 1];
-    double p_mass_i2 = world.mass[i + 1];
-    for (int j = i + 1; j < nplanets; j++) {
-      double dx = world.x[j] - p_x_i;
-      double dy = world.y[j] - p_y_i;
-      double distSqr = dx * dx + dy * dy + 0.0001;
-      double invDist = p_mass_i * world.mass[j] / sqrt(distSqr);
-      double invDist3 = invDist * invDist * invDist;
+    const vec x_i2 = set1(world.x[i + 1]);
+    const vec y_i2 = set1(world.y[i + 1]);
+    const vec mass_i2 = set1(world.mass[i + 1]);
+    vec acc_x2 = zero();
+    vec acc_y2 = zero();
 
-      double dx2 = world.x[j] - p_x_i2;
-      double dy2 = world.y[j] - p_y_i2;
-      double distSqr2 = dx2 * dx2 + dy2 * dy2 + 0.0001;
-      double invDist2 = p_mass_i2 * world.mass[j] / sqrt(distSqr2);
-      double invDist32 = invDist2 * invDist2 * invDist2;
+    for (int j = 0; j < nplanets; j += WIDTH) {
+      const vec dx = sub(load(world.x + j), x_i);
+      const vec dy = sub(load(world.y + j), y_i);
+      const vec distSqr = fmadd(dx, dx, fmadd(dy, dy, epsilon));
+#ifdef EXACT
+      const vec inv = div(mul(mass_i, load(world.mass + j)), vsqrt(distSqr));
+#else
+      const vec inv = mul(mul(mass_i, load(world.mass + j)), rsqrt(distSqr));
+#endif
 
-      world.vx[i] += dt * dx * invDist3;
-      world.vy[i] += dt * dy * invDist3;
-      world.vx[j] -= dt * dx * invDist3;
-      world.vy[j] -= dt * dy * invDist3;
+      const vec dx2 = sub(load(world.x + j), x_i2);
+      const vec dy2 = sub(load(world.y + j), y_i2);
+      const vec distSqr2 = fmadd(dx2, dx2, fmadd(dy2, dy2, epsilon));
+#ifdef EXACT
+      const vec inv2 = div(mul(mass_i2, load(world.mass + j)), vsqrt(distSqr2));
+#else
+      const vec inv2 = mul(mul(mass_i2, load(world.mass + j)), rsqrt(distSqr2));
+#endif
+      const vec invDist3 = mul(mul(inv, inv), inv);
+      // acc = acc + dx*invDist3
+      acc_x = fmadd(dx, invDist3, acc_x);
+      acc_y = fmadd(dy, invDist3, acc_y);
 
-      world.vx[i + 1] += dt * dx2 * invDist32;
-      world.vy[i + 1] += dt * dy2 * invDist32;
-      world.vx[j] -= dt * dx2 * invDist32;
-      world.vy[j] -= dt * dy2 * invDist32;
+      const vec invDist32 = mul(mul(inv2, inv2), inv2);
+      acc_x2 = fmadd(dx2, invDist32, acc_x2);
+      acc_y2 = fmadd(dy2, invDist32, acc_y2);
     }
+    world.vx[i] += dt * reduce_add(acc_x);
+    world.vy[i] += dt * reduce_add(acc_y);
+    world.vx[i + 1] += dt * reduce_add(acc_x2);
+    world.vy[i + 1] += dt * reduce_add(acc_y2);
   }
 
-  for (int i = 0; i < nplanets; i++) {
-    world.x[i] += dt * world.vx[i];
-    world.y[i] += dt * world.vy[i];
+  for (int i = 0; i < nplanets; i += WIDTH) {
+    // p = p + v*dt
+    const vec x = fmadd(dt_vec, load(world.vx + i), load(world.x + i));
+    const vec y = fmadd(dt_vec, load(world.vy + i), load(world.y + i));
+    store(world.x + i, x);
+    store(world.y + i, y);
   }
 }
 
@@ -191,14 +205,12 @@ int main(int argc, const char** argv) {
     world.y[i] = (randomDouble() - 0.5) * 100 * pow(1 + nplanets, 0.4);
     world.vx[i] = randomDouble() * 5 - 2.5;
     world.vy[i] = randomDouble() * 5 - 2.5;
-    // if (i%16 ==0) printf("%0.16f %0.16f ", world.x[i], world.y[i]);
   }
-  // printf("\n");
 
   struct timeval start, end;
   gettimeofday(&start, NULL);
   if (nplanets <= VECTOR_THRESHOLD) {
-    for (int i = 0; i < timesteps; i++) simulate_unvectorized(world);
+    for (int i = 0; i < timesteps; i++) simulate_sequential(world);
   } else {
     for (int i = 0; i < timesteps; i++) simulate(world);
   }

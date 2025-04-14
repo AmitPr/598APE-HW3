@@ -3,3 +3,4 @@ perf.data*
 profile.json.gz
 cachegrind.out*
 *.txt
+*.csv
